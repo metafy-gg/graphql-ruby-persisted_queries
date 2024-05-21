@@ -4,6 +4,7 @@ require "graphql/persisted_queries/hash_generator_builder"
 require "graphql/persisted_queries/resolver"
 require "graphql/persisted_queries/multiplex_resolver"
 require "graphql/persisted_queries/compiled_queries/instrumentation"
+require "graphql/persisted_queries/compiled_queries/query_trace"
 require "graphql/persisted_queries/analyzers/http_method_validator"
 
 module GraphQL
@@ -26,8 +27,7 @@ module GraphQL
 
         def configure_compiled_queries(schema)
           if graphql_ruby_after_2_2_5?
-            schema.trace_with(GraphQL::Tracing::LegacyHooksTrace)
-            schema.instance_exec { own_instrumenters[:query] << CompiledQueries::Instrumentation }
+            schema.trace_with(CompiledQueries::QueryTrace)
           else
             schema.instrument :query, CompiledQueries::Instrumentation
           end
@@ -52,6 +52,7 @@ module GraphQL
       attr_writer :persisted_queries_tracing_enabled
 
       def configure_persisted_query_store(store, **options)
+        tracers = options.delete(:tracers) || []
         @persisted_query_store = StoreAdapters.build(store, **options).tap do |adapter|
           adapter.tracers = tracers if persisted_queries_tracing_enabled?
         end
@@ -84,15 +85,6 @@ module GraphQL
       def persisted_queries_tracing_enabled?
         @persisted_queries_tracing_enabled ||=
           find_inherited_value(:persisted_queries_tracing_enabled?)
-      end
-
-      def tracer(name)
-        super.tap do
-          # Since tracers can be set before *and* after our plugin hooks in,
-          # we need to set tracers both when this plugin gets initialized
-          # and any time a tracer is added after initialization
-          persisted_query_store.tracers = tracers if persisted_queries_tracing_enabled?
-        end
       end
 
       private
